@@ -98,3 +98,34 @@ func TestIdentityHeaderStrippedWhenNoClientCert(t *testing.T) {
 		t.Fatalf("spoofed identity header must be stripped; backend saw %q", seen)
 	}
 }
+
+func TestClientProxyForwards(t *testing.T) {
+	testca.RequireLoopback(t)
+	var gotPath string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.RequestURI()
+		io.WriteString(w, "via-client-sidecar")
+	}))
+	defer backend.Close()
+
+	burl, _ := url.Parse(backend.URL)
+	h, err := proxy.Client(burl, proxy.ClientOptions{Insecure: true}) // plain-HTTP upstream, no client cert
+	if err != nil {
+		t.Fatalf("Client: %v", err)
+	}
+	front := httptest.NewServer(h)
+	defer front.Close()
+
+	resp, err := http.Get(front.URL + "/x/y?z=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if gotPath != "/x/y?z=1" {
+		t.Errorf("path not forwarded: got %q", gotPath)
+	}
+	if string(body) != "via-client-sidecar" {
+		t.Errorf("body: got %q", body)
+	}
+}
