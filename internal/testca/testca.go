@@ -10,10 +10,26 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
+	"net"
 	"os"
 	"testing"
 	"time"
 )
+
+// RequireLoopback skips the test if the environment cannot bind a loopback
+// socket (e.g. a sandbox that blocks listening), so httptest-based tests do not
+// panic where networking is unavailable.
+func RequireLoopback(t *testing.T) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		ln, err = net.Listen("tcp", "[::1]:0")
+	}
+	if err != nil {
+		t.Skipf("skipping (no loopback socket in this environment): %v", err)
+	}
+	_ = ln.Close()
+}
 
 // Cert bundles a certificate with its key and common encodings.
 type Cert struct {

@@ -8,10 +8,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/brywil/truemtls/internal/testca"
 	"github.com/brywil/truemtls/proxy"
 )
 
 func TestTransparentPassthrough(t *testing.T) {
+	testca.RequireLoopback(t)
 	var (
 		gotMethod, gotPath, gotHeader, gotCookie, gotBody string
 	)
@@ -71,6 +73,7 @@ func TestTransparentPassthrough(t *testing.T) {
 }
 
 func TestIdentityHeaderStrippedWhenNoClientCert(t *testing.T) {
+	testca.RequireLoopback(t)
 	var seen string
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		seen = r.Header.Get("X-Client-CN")

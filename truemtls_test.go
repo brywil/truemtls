@@ -23,6 +23,7 @@ import (
 // mTLS, with an untrusted client rejected at the handshake, then trusted after
 // out-of-band authority approval, then verified identity injected downstream.
 func TestEndToEnd(t *testing.T) {
+	testca.RequireLoopback(t)
 	dir := t.TempDir()
 	store, err := trust.Load(filepath.Join(dir, "trust"), nil, log.New(io.Discard, "", 0))
 	if err != nil {
