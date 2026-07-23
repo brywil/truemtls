@@ -57,23 +57,56 @@ tasks:
     deps: [build]
     cmds:
       - mkdir -p {{.INSTALL_DIR}}
-      - cp {{.BUILD_DIR}}/{{.BINARY}} {{.INSTALL_DIR}}/{{.BINARY}}
+      # Atomic replace (temp + rename) so it works even when the target binary
+      # is currently running — a plain cp fails with "text file busy" (ETXTBSY).
+      - cp {{.BUILD_DIR}}/{{.BINARY}} {{.INSTALL_DIR}}/{{.BINARY}}.new
+      - mv -f {{.INSTALL_DIR}}/{{.BINARY}}.new {{.INSTALL_DIR}}/{{.BINARY}}
       - echo "installed {{.INSTALL_DIR}}/{{.BINARY}}"
 
   deploy:
-    desc: "Build + test, install to {{.INSTALL_DIR}}, and restart the {{.SERVICE}} user service if present"
+    desc: "Build + test, stop the service, install, start it (user service, no sudo)"
     deps: [build, test]
     cmds:
-      - task: install
-      # Restart the user service only if a unit is actually installed, so deploy
-      # works whether or not truemtls runs as a service on this host. No sudo.
+      # Stop first (if the unit exists) so the binary isn't busy, then install,
+      # then start. Guarded so deploy also works when truemtls isn't a service.
       - |
         if {{.XDG}} systemctl --user cat {{.SERVICE}}.service >/dev/null 2>&1; then
-          {{.XDG}} systemctl --user restart {{.SERVICE}}.service
-          echo "restarted {{.SERVICE}}.service"
-        else
-          echo "no {{.SERVICE}}.service user unit installed — binary staged only"
+          echo "stopping {{.SERVICE}}.service"
+          {{.XDG}} systemctl --user stop {{.SERVICE}}.service || true
         fi
+      - task: install
+      - |
+        if {{.XDG}} systemctl --user cat {{.SERVICE}}.service >/dev/null 2>&1; then
+          {{.XDG}} systemctl --user start {{.SERVICE}}.service
+          echo "started {{.SERVICE}}.service"
+        else
+          echo "no {{.SERVICE}}.service user unit installed — binary staged at {{.INSTALL_DIR}}/{{.BINARY}}"
+        fi
+
+  start:
+    desc: "Start the {{.SERVICE}} user service"
+    cmds:
+      - "{{.XDG}} systemctl --user start {{.SERVICE}}.service"
+
+  stop:
+    desc: "Stop the {{.SERVICE}} user service"
+    cmds:
+      - "{{.XDG}} systemctl --user stop {{.SERVICE}}.service"
+
+  restart:
+    desc: "Restart the {{.SERVICE}} user service"
+    cmds:
+      - "{{.XDG}} systemctl --user restart {{.SERVICE}}.service"
+
+  status:
+    desc: "Show {{.SERVICE}} user service status"
+    cmds:
+      - "{{.XDG}} systemctl --user status {{.SERVICE}}.service --no-pager || true"
+
+  logs:
+    desc: "Follow the {{.SERVICE}} user service logs"
+    cmds:
+      - "{{.XDG}} journalctl --user -u {{.SERVICE}}.service -f"
 
   install-unit:
     desc: "Install the truemtls systemd --user service (no sudo); enables but does not start"
