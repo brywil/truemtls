@@ -1,0 +1,27 @@
+# systemd --user unit for truemtls (no sudo).
+# Install:  task install-unit   (copies this to ~/.config/systemd/user/)
+# Configure: edit ~/.config/truemtls/truemtls.env
+# Start:    systemctl --user start truemtls
+[Unit]
+Description=truemtls — mandatory-mTLS front door
+Documentation=https://github.com/brywil/truemtls
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/truemtls/truemtls.env
+ExecStart=%h/.local/bin/truemtls serve --backend ${BACKEND} --listen ${LISTEN}
+Restart=on-failure
+RestartSec=2
+
+# Hardening: the proxy only needs to read its config and read/write its trust
+# directory (server cert, pending queue). Everything else is locked down.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.config/truemtls
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

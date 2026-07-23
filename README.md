@@ -85,6 +85,23 @@ authenticated principal may *do*) is intentionally out of scope — layer it on 
 by the client-cert CN. (See [`mymcp`](https://github.com/brywil/mymcp) for an
 example that gates MCP tools per CN.)
 
+## Build & run as a user service
+
+With [go-task](https://taskfile.dev/):
+
+```bash
+task build            # -> build/truemtls
+task test             # go test ./...
+task install          # -> ~/.local/bin/truemtls
+task install-unit     # systemd --user service (no sudo); enables but doesn't start
+# edit ~/.config/truemtls/truemtls.env (BACKEND, LISTEN), then:
+systemctl --user start truemtls
+task deploy           # build + test + install + restart the user service if present
+```
+
+Everything is per-user: the binary lands in `~/.local/bin`, the unit in
+`~/.config/systemd/user/`, config in `~/.config/truemtls/`. No root required.
+
 ## Security notes
 
 - Because a CN may be honored regardless of which trusted CA issued the cert (a

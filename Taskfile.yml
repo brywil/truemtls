@@ -1,0 +1,108 @@
+version: 3
+
+vars:
+  BINARY: truemtls
+  BUILD_DIR: ./build
+  PKG: ./cmd/truemtls
+  # Where `deploy` installs the binary. Override: `task deploy INSTALL_DIR=/opt/bin`.
+  INSTALL_DIR: "{{.HOME}}/.local/bin"
+  # Optional systemd --user service to restart on deploy (if it exists).
+  SERVICE: truemtls
+  XDG: "XDG_RUNTIME_DIR=/run/user/$(id -u)"
+
+tasks:
+  default:
+    desc: "List available tasks"
+    cmds:
+      - task -l
+    silent: true
+
+  build:
+    desc: "Build the CLI to {{.BUILD_DIR}}/{{.BINARY}}"
+    cmds:
+      - mkdir -p {{.BUILD_DIR}}
+      - go build -o {{.BUILD_DIR}}/{{.BINARY}} {{.PKG}}
+
+  test:
+    desc: "Run the test suite"
+    cmds:
+      - go test ./... -count=1
+
+  test:race:
+    desc: "Run the test suite with the race detector"
+    cmds:
+      - go test ./... -race -count=1
+
+  test:cover:
+    desc: "Run tests with a coverage report (coverage.out / coverage.html)"
+    cmds:
+      - go test ./... -count=1 -coverprofile=coverage.out
+      - go tool cover -func=coverage.out
+      - go tool cover -html=coverage.out -o coverage.html
+
+  check:
+    desc: "Format check + vet + test"
+    cmds:
+      - test -z "$(gofmt -l .)" || (echo 'gofmt needed:'; gofmt -l .; exit 1)
+      - go vet ./...
+      - task: test
+
+  run:
+    desc: "Run the CLI (pass args after --, e.g. `task run -- serve --backend http://127.0.0.1:8080`)"
+    cmds:
+      - go run {{.PKG}} {{.CLI_ARGS}}
+
+  install:
+    desc: "Build and install the binary into {{.INSTALL_DIR}}"
+    deps: [build]
+    cmds:
+      - mkdir -p {{.INSTALL_DIR}}
+      - cp {{.BUILD_DIR}}/{{.BINARY}} {{.INSTALL_DIR}}/{{.BINARY}}
+      - echo "installed {{.INSTALL_DIR}}/{{.BINARY}}"
+
+  deploy:
+    desc: "Build + test, install to {{.INSTALL_DIR}}, and restart the {{.SERVICE}} user service if present"
+    deps: [build, test]
+    cmds:
+      - task: install
+      # Restart the user service only if a unit is actually installed, so deploy
+      # works whether or not truemtls runs as a service on this host. No sudo.
+      - |
+        if {{.XDG}} systemctl --user cat {{.SERVICE}}.service >/dev/null 2>&1; then
+          {{.XDG}} systemctl --user restart {{.SERVICE}}.service
+          echo "restarted {{.SERVICE}}.service"
+        else
+          echo "no {{.SERVICE}}.service user unit installed — binary staged only"
+        fi
+
+  install-unit:
+    desc: "Install the truemtls systemd --user service (no sudo); enables but does not start"
+    deps: [install]
+    vars:
+      UNIT_DIR: "{{.HOME}}/.config/systemd/user"
+      CFG_DIR: "{{.HOME}}/.config/truemtls"
+    cmds:
+      - mkdir -p {{.UNIT_DIR}} {{.CFG_DIR}}
+      - cp truemtls.service {{.UNIT_DIR}}/truemtls.service
+      - '[ -f {{.CFG_DIR}}/truemtls.env ] || cp truemtls.env.example {{.CFG_DIR}}/truemtls.env'
+      # Let the user manager run without an active login so the service survives logout.
+      - loginctl enable-linger "$USER" || true
+      - "{{.XDG}} systemctl --user daemon-reload"
+      # Enable (persist) but do NOT --now: the service must be configured first.
+      - "{{.XDG}} systemctl --user enable truemtls.service"
+      - 'echo "Edit {{.CFG_DIR}}/truemtls.env, then: systemctl --user start truemtls"'
+
+  uninstall-unit:
+    desc: "Stop, disable, and remove the truemtls user service (keeps config + trust)"
+    vars:
+      UNIT_DIR: "{{.HOME}}/.config/systemd/user"
+    cmds:
+      - "{{.XDG}} systemctl --user disable --now truemtls.service || true"
+      - rm -f {{.UNIT_DIR}}/truemtls.service
+      - "{{.XDG}} systemctl --user daemon-reload"
+
+  clean:
+    desc: "Remove build + coverage artifacts"
+    cmds:
+      - rm -rf {{.BUILD_DIR}}
+      - rm -f coverage.out coverage.html
