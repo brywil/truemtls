@@ -17,6 +17,38 @@ with zero third-party dependencies (Go stdlib only).
   rejected; you approve it out of band (`truemtls trust approve …`), then it
   works. Like `known_hosts`, for client CAs.
 
+## Prerequisites: a working Go environment
+
+> If you don't do Go development day to day, read this first — it's the #1
+> reason a freshly `go install`ed tool reports "command not found".
+
+`go install` writes binaries to `$GOBIN` (or `$GOPATH/bin` when `GOBIN` is
+unset). If that directory isn't on your `PATH`, the installed `truemtls` (and
+`task`, below) exist but your shell can't find them. Set this up once in
+`~/.bashrc`:
+
+```bash
+export GOROOT=/usr/local/go            # the Go toolchain (provides `go`)
+export GOPATH="$HOME/go"               # your Go workspace (module cache, etc.)
+export GOBIN="$GOPATH/bin"             # where `go install` puts binaries
+export PATH="$GOROOT/bin:$GOPATH/bin:$HOME/.local/bin:$PATH"
+```
+
+Then reload and verify:
+
+```bash
+source ~/.bashrc
+go env GOROOT GOPATH GOBIN
+```
+
+- **`GOROOT`** — where the toolchain lives. Usually auto-detected; set it only
+  if `go` isn't already on your `PATH`.
+- **`GOPATH`** — your workspace, default `~/go`.
+- **`GOBIN`** — where `go install` drops binaries. **This is the one that must
+  be on `PATH`**, or nothing you install is runnable.
+
+If `~/.bashrc` already has Go lines, edit those instead of adding duplicates.
+
 ## Install
 
 ```bash
@@ -87,7 +119,9 @@ example that gates MCP tools per CN.)
 
 ## Build & run as a user service
 
-With [go-task](https://taskfile.dev/):
+With [go-task](https://taskfile.dev/) — install it with
+`go install github.com/go-task/task/v3/cmd/task@latest` (it lands in `$GOBIN`;
+see [Prerequisites](#prerequisites-a-working-go-environment)):
 
 ```bash
 task build            # -> build/truemtls
