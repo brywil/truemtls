@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"html"
 	"log"
 	"net"
 	"net/http"
@@ -66,6 +67,8 @@ serve flags:
   --client-id-header H  inject the client CN under header H (stripped from inbound first)
   --no-xforwarded       do not add X-Forwarded-* headers
   --backend-insecure    skip TLS verification to an https backend
+  --approval-page       serve a 403 "pending approval" page to unapproved certs
+                        instead of rejecting them at the TLS handshake
 `)
 }
 
@@ -87,6 +90,7 @@ func runServe(args []string) error {
 	backendInsecure := fs.Bool("backend-insecure", false, "skip TLS verify to https backend")
 	serverCert := fs.String("server-cert", "", "server cert PEM (default <config-dir>/server.crt)")
 	serverKey := fs.String("server-key", "", "server key PEM (default <config-dir>/server.key)")
+	approvalPage := fs.Bool("approval-page", false, "on an unapproved client cert, serve a 403 'pending approval' page instead of rejecting at the TLS handshake")
 	_ = fs.Parse(args)
 
 	if *backend == "" {
@@ -117,21 +121,93 @@ func runServe(args []string) error {
 		return err
 	}
 
-	handler := proxy.New(burl, proxy.Options{
+	// The transparent proxy itself stays pure (untouched forwarder).
+	var handler http.Handler = proxy.New(burl, proxy.Options{
 		IdentityHeader:  *idHeader,
 		XForwarded:      !*noXFwd,
 		PreserveHost:    true,
 		BackendInsecure: *backendInsecure,
 	})
-	srv := &http.Server{
-		Addr:      *listen,
-		Handler:   handler,
-		TLSConfig: truemtls.ServerTLSConfig(store, cert),
+
+	// Strict (default): unapproved certs are rejected at the TLS handshake.
+	// Approval-page: the handshake completes for any client cert and the trust
+	// decision is made per-request, serving a friendly 403 to clients not on the
+	// approved list. Either way, only approved clients ever reach the backend.
+	var tlsConf *tls.Config
+	if *approvalPage {
+		handler = approvalGate(store, handler)
+		tlsConf = &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			ClientAuth:   tls.RequireAnyClientCert,
+			MinVersion:   tls.VersionTLS12,
+		}
+	} else {
+		tlsConf = truemtls.ServerTLSConfig(store, cert)
 	}
-	log.Printf("truemtls %s: mTLS on https://%s  ->  %s", version, *listen, *backend)
+
+	mode := "strict (reject at handshake)"
+	if *approvalPage {
+		mode = "approval-page"
+	}
+	srv := &http.Server{Addr: *listen, Handler: handler, TLSConfig: tlsConf}
+	log.Printf("truemtls %s: mTLS on https://%s  ->  %s  [%s]", version, *listen, *backend, mode)
 	log.Printf("trust dir: %s", trustDir)
 	return srv.ListenAndServeTLS("", "")
 }
+
+// approvalGate serves a "pending approval" page to clients whose certificate is
+// not on the approved list, and forwards approved clients to next. An unapproved
+// client never reaches the backend.
+func approvalGate(store *trust.Store, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+			http.Error(w, "client certificate required", http.StatusForbidden)
+			return
+		}
+		if dec := store.Check(r.TLS.PeerCertificates); dec.Trusted {
+			next.ServeHTTP(w, r)
+		} else {
+			writeApprovalPage(w, dec)
+		}
+	})
+}
+
+func writeApprovalPage(w http.ResponseWriter, dec trust.Decision) {
+	cn := dec.CN
+	if cn == "" {
+		cn = "(certificate has no Common Name)"
+	}
+	short := dec.Fingerprint
+	if len(short) > 16 {
+		short = short[:16]
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusForbidden)
+	fmt.Fprintf(w, approvalHTML, html.EscapeString(cn), html.EscapeString(short), html.EscapeString(dec.Fingerprint))
+}
+
+const approvalHTML = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Approval required</title>
+<style>
+  body{font-family:system-ui,-apple-system,sans-serif;max-width:40rem;margin:4rem auto;padding:0 1.5rem;line-height:1.6;color:#1a1a1a}
+  h1{font-size:1.5rem;margin-bottom:.5rem}
+  .box{background:#f4f4f5;border-radius:.5rem;padding:.5rem .75rem;font-family:ui-monospace,Menlo,monospace;word-break:break-all}
+  .id{font-size:1.15rem;font-weight:600}
+  .muted{color:#666;font-size:.9rem}
+  @media (prefers-color-scheme:dark){body{color:#e5e5e5;background:#0f0f10}.box{background:#1c1c1f}.muted{color:#9a9a9a}}
+</style></head><body>
+<h1>Approval required</h1>
+<p>You are authenticated as:</p>
+<p class="box id">%s</p>
+<p>&hellip;but you are <strong>not on the approved list</strong> for this service yet.</p>
+<p>Ask your system administrator to approve you, and give them this certificate fingerprint:</p>
+<p class="box id">%s</p>
+<p class="muted">Full SHA-256 fingerprint:</p>
+<p class="box muted">%s</p>
+</body></html>
+`
 
 func runTrust(args []string) error {
 	if len(args) == 0 {

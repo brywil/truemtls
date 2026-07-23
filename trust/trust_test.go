@@ -1,6 +1,7 @@
 package trust_test
 
 import (
+	"crypto/x509"
 	"io"
 	"log"
 	"path/filepath"
@@ -119,6 +120,34 @@ func TestSeedCATrustedWithoutApproval(t *testing.T) {
 
 	if err := s.Verify(testca.Chain(ca.Issue(t, "carol"), ca), nil); err != nil {
 		t.Fatalf("seed CA should trust its leaf without approval: %v", err)
+	}
+}
+
+func TestCheckReportsApprovalAndQueuesPending(t *testing.T) {
+	s := newStore(t)
+	ca := testca.NewCA(t, "Test CA")
+	leaf := ca.Issue(t, "dave")
+	chain := []*x509.Certificate{leaf.Cert, ca.Cert}
+
+	dec := s.Check(chain)
+	if dec.Trusted {
+		t.Fatal("expected not-approved for an unknown cert")
+	}
+	if dec.CN != "dave" {
+		t.Fatalf("CN = %q, want dave", dec.CN)
+	}
+	if len(dec.Fingerprint) != 64 {
+		t.Fatalf("fingerprint length = %d, want 64 hex chars", len(dec.Fingerprint))
+	}
+	if p, _ := s.Pending(); len(p) != 1 {
+		t.Fatalf("Check should queue a pending entry; got %d", len(p))
+	}
+
+	if _, err := s.ApproveAuthority(dec.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+	if dec := s.Check(chain); !dec.Trusted {
+		t.Fatal("expected approved after trusting the CA")
 	}
 }
 
