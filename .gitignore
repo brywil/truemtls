@@ -1,6 +1,6 @@
-# build artifacts
+# build artifacts (anchored to repo root so it never matches cmd/truemtls/)
 /build/
-truemtls
+/truemtls
 *.test
 
 # local certs / keys / trust material — never commit
