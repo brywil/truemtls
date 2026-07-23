@@ -31,9 +31,16 @@ func EnsureServerCert(certPath, keyPath string, hosts []string) error {
 	if err != nil {
 		return err
 	}
+	// A server certificate should identify the host, not a product. Use the
+	// hostname (fallback "truemtls" if unavailable); the SANs below carry the
+	// hostname and IPs that clients actually verify.
+	cn := "truemtls"
+	if h, err := os.Hostname(); err == nil && h != "" {
+		cn = h
+	}
 	tmpl := x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: "mymcp server"},
+		Subject:               pkix.Name{CommonName: cn},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().AddDate(10, 0, 0),
 		KeyUsage:              x509.KeyUsageDigitalSignature,
