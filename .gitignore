@@ -1,0 +1,15 @@
+# build artifacts
+/build/
+truemtls
+*.test
+
+# local certs / keys / trust material — never commit
+*.pem
+*.key
+*.crt
+*.p12
+/cfg/
+
+# editor/OS
+.DS_Store
+*.swp
