@@ -119,9 +119,19 @@ example that gates MCP tools per CN.)
 
 ## Build & run as a user service
 
-With [go-task](https://taskfile.dev/) — install it with
-`go install github.com/go-task/task/v3/cmd/task@latest` (it lands in `$GOBIN`;
-see [Prerequisites](#prerequisites-a-working-go-environment)):
+Uses [go-task](https://taskfile.dev/). Install it in one line — to
+`/usr/local/bin`, which is always on `PATH`, so no Go or `PATH` setup is needed:
+
+```bash
+sudo sh -c "$(curl -sL https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+task --version
+```
+
+(If `curl` is missing: `sudo apt install -y curl`. Alternatively, with a working
+Go env — see [Prerequisites](#prerequisites-a-working-go-environment) —
+`go install github.com/go-task/task/v3/cmd/task@latest`.)
+
+Then:
 
 ```bash
 task build            # -> build/truemtls
